@@ -23,6 +23,8 @@
   </div>
   <script>
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    let currentKey = 3;
+    let animating = false;
     function resizeCanvas() {
       const container = document.querySelector('.canvas-wrap');
       const canvas = document.getElementById('caesarWheel');
@@ -30,7 +32,7 @@
       canvas.width = size;
       canvas.height = size;
     }
-    function drawCaesarWheel(key) {
+    function drawCaesarWheel(key, rotation = 0) {
       resizeCanvas();
       const canvas = document.getElementById('caesarWheel');
       const ctx = canvas.getContext('2d');
@@ -60,7 +62,7 @@
       ctx.arc(cx, cy, (radius - canvas.width * 0.07 + radius - canvas.width * 0.14) / 2, 0, 2 * Math.PI);
       ctx.stroke();
       ctx.restore();
-      // Draw lines to distinguish the letter slots
+      // Draw lines to distinguish the letter slots (outer, fixed)
       ctx.save();
       ctx.strokeStyle = '#ccc';
       ctx.lineWidth = 1.2;
@@ -72,13 +74,31 @@
           cy + Math.sin(angle) * (radius - canvas.width * 0.17)
         );
         ctx.lineTo(
+          cx + Math.cos(angle) * (radius - canvas.width * 0.095),
+          cy + Math.sin(angle) * (radius - canvas.width * 0.095)
+        );
+        ctx.stroke();
+      }
+      ctx.restore();
+      // Draw lines to distinguish the letter slots (inner, rotating)
+      ctx.save();
+      ctx.strokeStyle = '#b3d1f7';
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < 26; i++) {
+        const angle = (2 * Math.PI / 26) * i - Math.PI / 2 + 2 * Math.PI / 26 / 2 + rotation;
+        ctx.beginPath();
+        ctx.moveTo(
+          cx + Math.cos(angle) * (radius - canvas.width * 0.095),
+          cy + Math.sin(angle) * (radius - canvas.width * 0.095)
+        );
+        ctx.lineTo(
           cx + Math.cos(angle) * (radius - canvas.width * 0.02),
           cy + Math.sin(angle) * (radius - canvas.width * 0.02)
         );
         ctx.stroke();
       }
       ctx.restore();
-      // Draw letters
+      // Draw letters (outer, plain)
       ctx.font = `bold ${Math.max(18, canvas.width * 0.055)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -93,9 +113,9 @@
         ctx.fillText(alphabet[i], 0, 0);
         ctx.restore();
       }
-      // Draw shifted letters (cipher)
+      // Draw shifted letters (inner, cipher) with rotation
       for (let i = 0; i < 26; i++) {
-        const angle = (2 * Math.PI / 26) * i - Math.PI / 2;
+        const angle = (2 * Math.PI / 26) * i - Math.PI / 2 + rotation;
         const x = cx + Math.cos(angle) * (radius - canvas.width * 0.14);
         const y = cy + Math.sin(angle) * (radius - canvas.width * 0.14);
         ctx.save();
@@ -117,12 +137,36 @@
       ctx.font = `bold ${Math.max(14, canvas.width * 0.045)}px sans-serif`;
       ctx.fillStyle = '#333';
       ctx.textAlign = 'center';
-      // Move 'Plain' label above the wheel
       ctx.fillText('Plain', cx, cy - radius - canvas.width * 0.04);
       ctx.fillStyle = '#1976d2';
-      // Move 'Cipher' label below the wheel
       ctx.fillText('Cipher', cx, cy + radius + canvas.width * 0.06);
       ctx.restore();
+    }
+    function animateToKey(newKey) {
+      if (animating) return;
+      animating = true;
+      const steps = 30;
+      const startKey = currentKey;
+      let frame = 0;
+      let diff = ((newKey - startKey + 26) % 26);
+      if (diff > 13) diff -= 26; // Shortest direction
+      function step() {
+        frame++;
+        const progress = frame / steps;
+        const eased = 0.5 - 0.5 * Math.cos(Math.PI * progress); // easeInOut
+        // Reverse the direction of rotation
+        const rot = -eased * diff * (2 * Math.PI / 26);
+        drawCaesarWheel(startKey, rot);
+        if (frame < steps) {
+          requestAnimationFrame(step);
+        } else {
+          currentKey = newKey;
+          animating = false;
+          drawCaesarWheel(currentKey, 0);
+          document.getElementById('output').textContent = caesarShift(document.getElementById('message').value, currentKey);
+        }
+      }
+      step();
     }
     function caesarShift(str, key) {
       return str.toUpperCase().split('').map(ch => {
@@ -136,12 +180,17 @@
       let key = parseInt(document.getElementById('key').value, 10);
       if (isNaN(key) || key < 0) key = 0;
       if (key > 25) key = 25;
-      drawCaesarWheel(key);
-      document.getElementById('output').textContent = caesarShift(msg, key);
+      if (key !== currentKey) {
+        animateToKey(key);
+      } else {
+        drawCaesarWheel(key, 0);
+        document.getElementById('output').textContent = caesarShift(msg, key);
+      }
     }
-    window.addEventListener('resize', () => updateCipher());
+    window.addEventListener('resize', () => drawCaesarWheel(currentKey, 0));
     // Initial draw
-    updateCipher();
+    drawCaesarWheel(currentKey, 0);
+    document.getElementById('output').textContent = caesarShift(document.getElementById('message').value, currentKey);
   </script>
 </body>
 </html>
