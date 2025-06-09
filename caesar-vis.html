@@ -46,6 +46,38 @@
       ctx.lineWidth = Math.max(4, canvas.width * 0.012);
       ctx.stroke();
       ctx.restore();
+      // Draw 3 additional light grey circles for alignment
+      ctx.save();
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius - canvas.width * 0.02, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius - canvas.width * 0.17, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, (radius - canvas.width * 0.07 + radius - canvas.width * 0.14) / 2, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.restore();
+      // Draw lines to distinguish the letter slots
+      ctx.save();
+      ctx.strokeStyle = '#ccc';
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < 26; i++) {
+        const angle = (2 * Math.PI / 26) * i - Math.PI / 2 + 2 * Math.PI / 26 / 2;
+        ctx.beginPath();
+        ctx.moveTo(
+          cx + Math.cos(angle) * (radius - canvas.width * 0.17),
+          cy + Math.sin(angle) * (radius - canvas.width * 0.17)
+        );
+        ctx.lineTo(
+          cx + Math.cos(angle) * (radius - canvas.width * 0.02),
+          cy + Math.sin(angle) * (radius - canvas.width * 0.02)
+        );
+        ctx.stroke();
+      }
+      ctx.restore();
       // Draw letters
       ctx.font = `bold ${Math.max(18, canvas.width * 0.055)}px sans-serif`;
       ctx.textAlign = 'center';
