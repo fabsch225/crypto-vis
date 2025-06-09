@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Elliptic Curve Visualizer</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Remove most styles, only keep canvas border for clarity */
+    canvas { border: 1px solid #333; margin-top: 10px; border-radius: 12px; box-shadow: 0 2px 8px #0001; }
+    #weierstrassParams, #montgomeryParams {
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+    }
+    #weierstrassParams label, #montgomeryParams label {
+      font-weight: bold;
+      margin: 0 6px;
+    }
+    .output {
+      font-size: 2.1em;
+      margin-top: 28px;
+      font-weight: bold;
+      letter-spacing: 0.06em;
+    }
+    .canvas-wrap {
+      flex: 1 1 auto;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container > div:first-child { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Elliptic Curve Point Addition: P + Q = R</h2>
+    <div>
+      <label>
+        <input type="radio" name="curveType" id="weierstrassRadio" checked autocomplete="off" onchange="setCurveType('weierstrass')">
+        Short Weierstrass
+      </label>
+      <label>
+        <input type="radio" name="curveType" id="montgomeryRadio" autocomplete="off" onchange="setCurveType('montgomery')">
+        Montgomery
+      </label>
+    </div>
+    <div id="weierstrassParams">
+      <label>A: <input type="range" id="a" min="-10" max="10" step="0.01" value="-1" style="width:200px"><span id="aVal">-1</span></label>
+      <label>B: <input type="range" id="b" min="-10" max="10" step="0.01" value="1" style="width:200px"><span id="bVal">1</span></label>
+      <span>y² = x³ + Ax + B</span>
+    </div>
+    <div id="montgomeryParams" style="display:none;">
+      <label>A: <input type="range" id="A" min="-10" max="10" step="0.01" value="2" style="width:200px"><span id="AVal">2</span></label>
+      <label>B: <input type="range" id="B" min="-10" max="10" step="0.01" value="3" style="width:200px"><span id="BVal">3</span></label>
+      <span>By² = x³ + Ax² + x</span>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="curveCanvas"></canvas>
+    </div>
+  </div>
+  <script>
+    const canvas = document.getElementById("curveCanvas");
+    const ctx = canvas.getContext("2d");
+    const scale = 40;
+    let activeDragYSign = null;
+    let lastMouseY = null;
+
+    const origin = {x: canvas.width / 2, y: canvas.height / 2};
+    let a = -1, b = 1;
+    let A = 7.5, B = 1;
+    let curveType = 'weierstrass';
+    let points = [];
+
+    function f(x) {
+      if (curveType === 'weierstrass') {
+        return x ** 3 + a * x + b;
+      } else {
+        // Montgomery: By² = x³ + Ax² + x
+        return (x ** 3 + A * x ** 2 + x) / B;
+      }
+    }
+
+function resetPoints() {
+  // If points already exist, try to keep them near their old x positions
+  let oldPoints = points.slice();
+  points = [];
+
+  function findValidX(startX, direction) {
+    let x = startX;
+    for (let i = 0; i < 1000; i++) {
+      const y2 = f(x);
+      if (y2 >= 0) return x;
+      x += direction * 0.1;
+    }
+    return null;
+  }
+
+  // If we have old points, try to keep their x positions
+  if (oldPoints.length === 2) {
+    for (let i = 0; i < 2; i++) {
+      let x = oldPoints[i].x;
+      // Try to find a nearby valid x (within 0.5 units)
+      let found = false;
+      for (let dx = -0.5; dx <= 0.5; dx += 0.01) {
+        let testX = x + dx;
+        let y2 = f(testX);
+        if (y2 >= 0) {
+          points.push({
+            x: testX,
+            y: Math.sqrt(y2) * Math.sign(oldPoints[i].y || 1),
+            dragging: false
+          });
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // Fallback: find a valid x as before
+        let fallbackX = findValidX(i === 0 ? -2 : 2, i === 0 ? 1 : -1);
+        if (fallbackX !== null) {
+          let y2 = f(fallbackX);
+          points.push({
+            x: fallbackX,
+            y: Math.sqrt(y2),
+            dragging: false
+          });
+        }
+      }
+    }
+  } else {
+    // No old points, use default logic
+    const x1 = findValidX(-2, 1);
+    const x2 = findValidX(2, -1);
+    [x1, x2].forEach((x, i) => {
+      if (x !== null) {
+        const y2 = f(x);
+        points.push({
+          x,
+          y: Math.sqrt(y2) * (i === 0 ? 1 : 1), // always upper branch for both
+          dragging: false
+        });
+      }
+    });
+  }
+}
+
+
+    function drawAxes() {
+      ctx.strokeStyle = "#aaa";
+      ctx.lineWidth = 2; // Thicker axes
+      ctx.beginPath();
+      ctx.moveTo(0, origin.y);
+      ctx.lineTo(canvas.width, origin.y);
+      ctx.moveTo(origin.x, 0);
+      ctx.lineTo(origin.x, canvas.height);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+
+    function drawCurve() {
+        console.log("Drawing curve with a =", a, "b =", b);
+        ctx.strokeStyle = "lightblue";
+        ctx.lineWidth = 5; 
+        const step = 0.001;
+        const EPSILON = 1e-8;
+        // Draw the two branches
+        for (let sign of [1, -1]) {
+            ctx.beginPath();
+            let started = false;
+            for (let px = -10; px <= 10; px += step) {
+                let y2 = f(px);
+                if (y2 >= -EPSILON) {
+                    y2 = Math.max(y2, 0);
+                    const y = Math.sqrt(Math.abs(y2)) * sign;
+                    const cx = origin.x + px * scale;
+                    const cy = origin.y - y * scale;
+                    if (!started) {
+                        ctx.moveTo(cx, cy);
+                        started = true;
+                    } else {
+                        ctx.lineTo(cx, cy);
+                    }
+                } else {
+                    started = false;
+                }
+            }
+            ctx.stroke();
+        }
+
+        // Find real roots of f(x) in [-10, 10] using bisection
+        function findRoots(f, xMin, xMax, step, eps) {
+            let roots = [];
+            let prevX = xMin;
+            let prevY = f(prevX);
+            for (let x = xMin + step; x <= xMax; x += step) {
+                let y = f(x);
+                if (prevY * y <= 0) { // sign change or zero
+                    // Bisection refinement
+                    let a = prevX, b = x;
+                    for (let i = 0; i < 20; ++i) {
+                        let m = 0.5 * (a + b);
+                        let fm = f(m);
+                        if (Math.abs(fm) < eps) {
+                            a = b = m;
+                            break;
+                        }
+                        if (prevY * fm < 0) {
+                            b = m;
+                            y = fm;
+                        } else {
+                            a = m;
+                            prevY = fm;
+                        }
+                    }
+                    let root = 0.5 * (a + b);
+                    roots.push(root);
+                }
+                prevX = x;
+                prevY = y;
+            }
+            return roots;
+        }
+        const roots = findRoots(f, -10, 10, 0.001, EPSILON);
+        // Draw a line at each real root (x0,0) connecting the two branches
+        ctx.save();
+        
+        roots.forEach(x0 => {
+            const c = toCanvas({x: x0, y: 0});
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y - 5); // small vertical line
+            ctx.lineTo(c.x, c.y + 5);
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
+
+    function toCanvas(p) {
+      return {
+        x: origin.x + p.x * scale,
+        y: origin.y - p.y * scale
+      };
+    }
+
+    function fromCanvas(p) {
+      return {
+        x: (p.x - origin.x) / scale,
+        y: (origin.y - p.y) / scale
+      };
+    }
+
+    function drawPoint(p, color = "red", label = "", radiusOverride = null) {
+      const cp = toCanvas(p);
+      const radius = radiusOverride !== null ? radiusOverride : 16;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cp.x, cp.y, radius, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.shadowColor = "#222";
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#222";
+      ctx.stroke();
+      ctx.restore();
+      if (label) {
+        ctx.save();
+        ctx.font = "bold 18px sans-serif";
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, cp.x, cp.y);
+        ctx.restore();
+      }
+    }
+
+    function drawInfiniteLine(p1, p2, color = "green", betweenPoints = null) {
+      // If betweenPoints is provided, only draw the segment between those points (canvas coordinates)
+      const deltaX = p2.x - p1.x;
+      const deltaY = p2.y - p1.y;
+      if (deltaX === 0 && deltaY === 0) return;
+
+      const slope = deltaY / deltaX;
+      const intercept = p1.y - slope * p1.x;
+
+      let xStart, xEnd;
+      if (betweenPoints && betweenPoints.length === 2) {
+        xStart = betweenPoints[0].x;
+        xEnd = betweenPoints[1].x;
+      } else {
+        xStart = -canvas.width / (2 * scale);
+        xEnd = canvas.width / (2 * scale);
+      }
+
+      const start = {x: xStart, y: slope * xStart + intercept};
+      const end = {x: xEnd, y: slope * xEnd + intercept};
+
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      const cStart = toCanvas(start);
+      const cEnd = toCanvas(end);
+      ctx.moveTo(cStart.x, cStart.y);
+      ctx.lineTo(cEnd.x, cEnd.y);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.restore();
+    }
+
+    function drawSegment(p1, p2, color = "gray") {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.restore();
+    }
+
+    function ellipticAdd(P, Q) {
+      if (curveType === 'weierstrass') {
+        if (P.x === Q.x && P.y === -Q.y) return null; // Infinity
+        let s;
+        if (P.x === Q.x && P.y === Q.y) {
+          s = (3 * P.x ** 2 + a) / (2 * P.y);
+        } else {
+          s = (Q.y - P.y) / (Q.x - P.x);
+        }
+        const x3 = s ** 2 - P.x - Q.x;
+        const y3 = s * (P.x - x3) - P.y;
+        return {x: x3, y: y3};
+      } else if (curveType === 'montgomery') {
+        // Montgomery addition (for visualization, not full ladder):
+        // Given P = (x1, y1), Q = (x2, y2),
+        // x3 = B * (y2 - y1)^2 / (x2 - x1)^2 - A - x1 - x2
+        // y3 = (2*x1 + x2 + A) * (y2 - y1)/(x2 - x1) - B * (y2 - y1)^3/(x2 - x1)^3 - y1
+        if (P.x === Q.x) return null; // No doubling or vertical line
+        const x1 = P.x, y1 = P.y, x2 = Q.x, y2 = Q.y;
+        const num = (y2 - y1);
+        const den = (x2 - x1);
+        const x3 = B * (num * num) / (den * den) - A - x1 - x2;
+        const y3 = (2 * x1 + x2 + A) * (num) / (den) - B * (num * num * num) / (den * den * den) - y1;
+        return {x: x3, y: y3};
+      }
+      return null;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawAxes();
+      drawCurve();
+      if (points.length < 2) return; // Prevent undefined P/Q error
+      const R = ellipticAdd(points[0], points[1]);
+      // Draw gray line between R and R' first (below everything)
+      if (R) {
+        const Rref = {x: R.x, y: -R.y};
+        const cR = toCanvas(R);
+        const cRref = toCanvas(Rref);
+        drawSegment(cR, cRref, "gray");
+      }
+      // Draw green triangle between P, Q, R' next
+      if (R) {
+        const cP = toCanvas(points[0]);
+        const cQ = toCanvas(points[1]);
+        const Rref = {x: R.x, y: -R.y};
+        const cRref = toCanvas(Rref);
+        drawSegment(cP, cQ, "green");
+        drawSegment(cQ, cRref, "green");
+        drawSegment(cP, cRref, "green");
+      }
+      // Draw points and labels last
+      if (points[0]) drawPoint(points[0], "red", "P");
+      if (points[1]) drawPoint(points[1], "blue", "Q");
+      if (R) {
+        drawPoint(R, "green", "R");
+        const Rref = {x: R.x, y: -R.y};
+        drawPoint(Rref, "orange", "", 8); // half the normal radius
+      }
+    }
+
+    function setCurve() {
+      a = parseFloat(document.getElementById("a").value);
+      b = parseFloat(document.getElementById("b").value);
+      resetPoints();
+      draw();
+    }
+
+    function setCurveType(type) {
+      curveType = type;
+      document.getElementById('weierstrassParams').style.display = (type === 'weierstrass') ? '' : 'none';
+      document.getElementById('montgomeryParams').style.display = (type === 'montgomery') ? '' : 'none';
+      resetPoints();
+      draw();
+    }
+
+    function selectPreset(val) {
+      if (!val) return;
+      const [aVal, bVal] = val.split(',').map(Number);
+      document.getElementById("a").value = aVal;
+      document.getElementById("b").value = bVal;
+      setCurve();
+    }
+
+canvas.addEventListener("mousedown", e => {
+  const pos = fromCanvas({ x: e.offsetX, y: e.offsetY });
+  // Find the closest point within threshold, but if both are on top, only select P (points[0])
+  let threshold = 0.3;
+  let d0 = Math.hypot(pos.x - points[0].x, pos.y - points[0].y);
+  let d1 = points[1] ? Math.hypot(pos.x - points[1].x, pos.y - points[1].y) : Infinity;
+  if (d0 < threshold && d1 < threshold && d0 === d1) {
+    // Both are on top, only select P
+    points[0].dragging = true;
+    activeDragYSign = Math.sign(points[0].y) || 1;
+  } else {
+    points.forEach((p, i) => {
+      const dist = Math.hypot(pos.x - p.x, pos.y - p.y);
+      if (dist < threshold) {
+        p.dragging = true;
+        activeDragYSign = Math.sign(p.y) || 1; // store branch (default +1)
+      }
+    });
+  }
+});
+
+canvas.addEventListener("mousemove", e => {
+  const mousePos = fromCanvas({ x: e.offsetX, y: e.offsetY });
+
+  points.forEach(p => {
+    if (p.dragging) {
+      // Improved branch switching: treat curve as vertical near x-axis
+      const EPS = 0.2; // threshold for 'vertical' region
+      let y2 = f(mousePos.x);
+      let ySign = activeDragYSign;
+      if (Math.abs(mousePos.y) < EPS && y2 >= 0) {
+        // Near x-axis: choose branch closest to mouse y
+        const yPlus = Math.sqrt(y2);
+        const yMinus = -yPlus;
+        ySign = (Math.abs(mousePos.y - yPlus) < Math.abs(mousePos.y - yMinus)) ? 1 : -1;
+        activeDragYSign = ySign;
+      } else if (lastMouseY !== null && Math.sign(mousePos.y) !== Math.sign(lastMouseY)) {
+        activeDragYSign *= -1; // Flip branch
+        ySign = activeDragYSign;
+      }
+      lastMouseY = mousePos.y;
+
+      // Search for nearest point on both branches, prefer the one matching drag direction
+      const searchRange = 2;
+      const step = 0.01;
+      let minDist = Infinity;
+      let bestPoint = null;
+      let dragDir = Math.sign(mousePos.y - p.y) || ySign;
+
+      for (let dx = -searchRange; dx <= searchRange; dx += step) {
+        const testX = mousePos.x + dx;
+        const y2 = f(testX);
+        if (y2 >= 0) {
+          const yPlus = Math.sqrt(y2);
+          const yMinus = -yPlus;
+          // Check both branches
+          for (let branchY of [yPlus, yMinus]) {
+            const dist = Math.hypot(testX - mousePos.x, branchY - mousePos.y);
+            // Prefer branch matching drag direction if distances are similar
+            const branchSign = Math.sign(branchY - p.y);
+            const prefer = (branchSign === dragDir) ? 0.99 : 1; // slight preference
+            if (dist * prefer < minDist) {
+              minDist = dist * prefer;
+              bestPoint = { x: testX, y: branchY };
+            }
+          }
+        }
+      }
+
+      if (bestPoint) {
+        p.x = bestPoint.x;
+        p.y = bestPoint.y;
+        draw();
+      }
+    }
+  });
+});
+
+canvas.addEventListener("mouseup", () => {
+    points.forEach(p => (p.dragging = false));
+    activeDragYSign = null;
+    lastMouseY = null;
+    });
+
+
+    // Add slider event listeners for a and b
+    document.getElementById("a").addEventListener("input", function() {
+      document.getElementById("aVal").textContent = this.value;
+      a = parseFloat(this.value);
+      resetPoints();
+      draw();
+    });
+    document.getElementById("b").addEventListener("input", function() {
+      document.getElementById("bVal").textContent = this.value;
+      b = parseFloat(this.value);
+      resetPoints();
+      draw();
+    });
+    // Add slider event listeners for Montgomery parameters
+    document.getElementById("A").addEventListener("input", function() {
+      document.getElementById("AVal").textContent = this.value;
+      A = parseFloat(this.value);
+      resetPoints();
+      draw();
+    });
+    document.getElementById("B").addEventListener("input", function() {
+      document.getElementById("BVal").textContent = this.value;
+      B = parseFloat(this.value);
+      resetPoints();
+      draw();
+    });
+
+    // Responsive canvas sizing: fill most of the screen, keep square
+  function resizeCanvas() {
+    const margin = 150;
+    const size = Math.min(window.innerWidth, window.innerHeight) - margin;
+    const canvas = document.getElementById("curveCanvas");
+    canvas.width = size;
+    canvas.height = size;
+    origin.x = canvas.width / 2;
+    origin.y = canvas.height / 2;
+    draw();
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+    resetPoints();
+    draw();
+
+    window.addEventListener('DOMContentLoaded', function() {
+  // Always default to Weierstrass on load
+  document.getElementById('weierstrassRadio').checked = true;
+  document.getElementById('montgomeryRadio').checked = false;
+  setCurveType('weierstrass');
+});
+  </script>
+</body>
+</html>
