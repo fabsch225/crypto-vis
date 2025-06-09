@@ -64,32 +64,34 @@
       ctx.restore();
       // Draw lines to distinguish the letter slots (outer, fixed)
       ctx.save();
+        //ctx.strokeStyle = '#b3d1f7';
       ctx.strokeStyle = '#ccc';
       ctx.lineWidth = 1.2;
       for (let i = 0; i < 26; i++) {
-        const angle = (2 * Math.PI / 26) * i - Math.PI / 2 + 2 * Math.PI / 26 / 2;
+        
+        const angle = (2 * Math.PI / 26) * i - Math.PI / 2 + 2 * Math.PI / 26 / 2 + rotation;
         ctx.beginPath();
         ctx.moveTo(
           cx + Math.cos(angle) * (radius - canvas.width * 0.17),
           cy + Math.sin(angle) * (radius - canvas.width * 0.17)
         );
         ctx.lineTo(
-          cx + Math.cos(angle) * (radius - canvas.width * 0.095),
-          cy + Math.sin(angle) * (radius - canvas.width * 0.095)
+          cx + Math.cos(angle) * (radius - canvas.width * 0.1   ),
+          cy + Math.sin(angle) * (radius - canvas.width * 0.1)
         );
         ctx.stroke();
       }
       ctx.restore();
       // Draw lines to distinguish the letter slots (inner, rotating)
       ctx.save();
-      ctx.strokeStyle = '#b3d1f7';
+     ctx.strokeStyle = '#ccc';
       ctx.lineWidth = 1.2;
       for (let i = 0; i < 26; i++) {
-        const angle = (2 * Math.PI / 26) * i - Math.PI / 2 + 2 * Math.PI / 26 / 2 + rotation;
+        const angle = (2 * Math.PI / 26) * i - Math.PI / 2 + 2 * Math.PI / 26 / 2;
         ctx.beginPath();
         ctx.moveTo(
-          cx + Math.cos(angle) * (radius - canvas.width * 0.095),
-          cy + Math.sin(angle) * (radius - canvas.width * 0.095)
+          cx + Math.cos(angle) * (radius - canvas.width * 0.1),
+          cy + Math.sin(angle) * (radius - canvas.width * 0.1)
         );
         ctx.lineTo(
           cx + Math.cos(angle) * (radius - canvas.width * 0.02),
