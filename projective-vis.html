@@ -47,9 +47,10 @@ function getAffineCurvePoints() {
   return { xs, yp, yn };
 }
 
-// --- 2D Point P (draggable) ---
+// --- 2D Point P and Q (draggable) ---
 let P = { x: 1, y: Math.sqrt(1 ** 3 + a * 1 + b) };
-let dragging = false;
+let Q = { x: 2, y: Math.sqrt(2 ** 3 + a * 2 + b) };
+let draggingP = false, draggingQ = false;
 function getYOnCurve(x, sign = 1) {
   const y2 = x ** 3 + a * x + b;
   if (y2 < 0) return null;
@@ -91,30 +92,82 @@ function drawAffine() {
   });
   ctx.stroke();
 
-  // P and -P
+  // P and Q only (no -Q)
   drawPoint(P.x, P.y, "black");
+  drawPoint(Q.x, Q.y, "#0a0");
+  // Draw -P in red
   drawPoint(P.x, -P.y, "red");
-
-  // Vertical line through P
-  ctx.setLineDash([8, 8]);
-  ctx.strokeStyle = "green";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(toCanvasX(P.x), toCanvasY(yMin));
-  ctx.lineTo(toCanvasX(P.x), toCanvasY(yMax));
-  ctx.stroke();
-  ctx.setLineDash([]);
 
   // Labels
   const labelP = document.getElementById('labelP');
   const labelN = document.getElementById('labelN');
-  const px = toCanvasX(P.x), py = toCanvasY(P.y), npx = toCanvasX(P.x), npy = toCanvasY(-P.y);
+  const px = toCanvasX(P.x), py = toCanvasY(P.y);
   labelP.textContent = "P";
-  labelN.textContent = "-P";
   labelP.style.left = (px + 10) + "px";
   labelP.style.top = (py - 20) + "px";
-  labelN.style.left = (npx + 10) + "px";
-  labelN.style.top = (npy - 20) + "px";
+  labelN.textContent = "";
+  labelN.style.left = "-9999px";
+  labelN.style.top = "-9999px";
+
+  // Q label
+  let labelQ = document.getElementById('labelQ');
+  let labelNQ = document.getElementById('labelNQ');
+  if (!labelQ) {
+    labelQ = document.createElement('div');
+    labelQ.id = 'labelQ';
+    labelQ.className = 'label';
+    document.getElementById('affine2d').appendChild(labelQ);
+  }
+  if (!labelNQ) {
+    labelNQ = document.createElement('div');
+    labelNQ.id = 'labelNQ';
+    labelNQ.className = 'label';
+    document.getElementById('affine2d').appendChild(labelNQ);
+  }
+  const qx = toCanvasX(Q.x), qy = toCanvasY(Q.y);
+  labelQ.textContent = "Q";
+  labelQ.style.left = (qx + 10) + "px";
+  labelQ.style.top = (qy - 20) + "px";
+  labelNQ.textContent = "";
+  labelNQ.style.left = "-9999px";
+  labelNQ.style.top = "-9999px";
+
+  // Line through P and Q
+  ctx.save();
+  ctx.strokeStyle = "#0a0";
+  ctx.setLineDash([6, 6]);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  // y = s(x-x0)+y0
+  if (Math.abs(P.x - Q.x) > 1e-6) {
+    const s = (Q.y - P.y) / (Q.x - P.x);
+    const xA = xMin, xB = xMax;
+    const yA = s * (xA - P.x) + P.y;
+    const yB = s * (xB - P.x) + P.y;
+    ctx.moveTo(toCanvasX(xA), toCanvasY(yA));
+    ctx.lineTo(toCanvasX(xB), toCanvasY(yB));
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Find third intersection R
+  const R = findThirdIntersection(P, Q);
+  if (R) {
+    drawPoint(R.x, R.y, "#d0a");
+    // Label R
+    let labelR = document.getElementById('labelR');
+    if (!labelR) {
+      labelR = document.createElement('div');
+      labelR.id = 'labelR';
+      labelR.className = 'label';
+      document.getElementById('affine2d').appendChild(labelR);
+    }
+    const rx = toCanvasX(R.x), ry = toCanvasY(R.y);
+    labelR.textContent = "R";
+    labelR.style.left = (rx + 10) + "px";
+    labelR.style.top = (ry - 20) + "px";
+  }
 }
 
 function drawPoint(x, y, color) {
@@ -130,26 +183,83 @@ function drawPoint(x, y, color) {
 }
 
 // --- 2D Dragging Logic ---
+let activeDrag = null;
+let activeDragYSign = 1;
+let lastMouseY = null;
 affineCanvas.addEventListener('mousedown', e => {
   const rect = affineCanvas.getBoundingClientRect();
   const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-  const dx = toCanvasX(P.x) - mx, dy = toCanvasY(P.y) - my;
-  if (dx * dx + dy * dy < 16 * 16) dragging = true;
+  const dP = Math.hypot(toCanvasX(P.x) - mx, toCanvasY(P.y) - my);
+  const dQ = Math.hypot(toCanvasX(Q.x) - mx, toCanvasY(Q.y) - my);
+  if (dP < 16) { activeDrag = 'P'; activeDragYSign = Math.sign(P.y) || 1; }
+  else if (dQ < 16) { activeDrag = 'Q'; activeDragYSign = Math.sign(Q.y) || 1; }
+  lastMouseY = fromCanvasY(my);
 });
 window.addEventListener('mousemove', e => {
-  if (!dragging) return;
+  if (!activeDrag) return;
   const rect = affineCanvas.getBoundingClientRect();
   const mx = e.clientX - rect.left, my = e.clientY - rect.top;
   const x = Math.max(xMin + 0.1, Math.min(xMax - 0.1, fromCanvasX(mx)));
-  const y = getYOnCurve(x, Math.sign(P.y));
-  if (y !== null) {
-    P.x = x;
-    P.y = y;
+  const mouseY = fromCanvasY(my);
+  let pt = (activeDrag === 'P') ? P : Q;
+  let y2 = x ** 3 + a * x + b;
+  if (y2 >= 0) {
+    let ySign = activeDragYSign;
+    if (Math.abs(mouseY) < 0.2) {
+      // Near x-axis: choose branch closest to mouse y
+      const yPlus = Math.sqrt(y2);
+      const yMinus = -yPlus;
+      ySign = (Math.abs(mouseY - yPlus) < Math.abs(mouseY - yMinus)) ? 1 : -1;
+      activeDragYSign = ySign;
+    } else if (lastMouseY !== null && Math.sign(mouseY) !== Math.sign(lastMouseY)) {
+      activeDragYSign *= -1;
+      ySign = activeDragYSign;
+    }
+    lastMouseY = mouseY;
+    pt.x = x;
+    pt.y = ySign * Math.sqrt(y2);
     drawAffine();
     update3D();
   }
 });
-window.addEventListener('mouseup', () => dragging = false);
+window.addEventListener('mouseup', () => { activeDrag = null; lastMouseY = null; });
+
+// --- Find third intersection ---
+function findThirdIntersection(P, Q) {
+  if (Math.abs(P.x - Q.x) < 1e-8) return null;
+  const s = (Q.y - P.y) / (Q.x - P.x);
+  const x0 = P.x, y0 = P.y;
+  // y = s(x-x0)+y0
+  // Substitute into y^2 = x^3 + a x + b:
+  // (s(x-x0)+y0)^2 = x^3 + a x + b
+  // Expand: s^2(x-x0)^2 + 2s(x-x0)y0 + y0^2 - x^3 - a x - b = 0
+  // Rearranged: x^3 + (a - s^2) x + (b - 2s y0 + 2s^2 x0) + (s^2 x0^2 - 2s^2 x0 x + s^2 x^2) + (2s x y0 - 2s x0 y0) + (y0^2 - b) = 0
+  // But easier: (s(x-x0)+y0)^2 - (x^3 + a x + b) = 0
+  // This is a cubic in x. Find all real roots, pick the one not equal to P.x or Q.x
+  const coeffs = [
+    1, // x^3
+    0, // x^2
+    a - s * s, // x
+    b - 2 * s * y0 + s * s * x0 * x0 + 2 * s * s * x0 * (-1) + y0 * y0 - b // constant
+  ];
+  // Actually, let's just numerically search for roots in [xMin, xMax]
+  let roots = [];
+  for (let x = xMin; x <= xMax; x += 0.001) {
+    const y = s * (x - x0) + y0;
+    const val = y * y - (x ** 3 + a * x + b);
+    if (Math.abs(val) < 5e-3) {
+      // Check not P or Q
+      if (Math.abs(x - P.x) > 1e-2 && Math.abs(x - Q.x) > 1e-2) {
+        const yval = s * (x - x0) + y0;
+        if (!isNaN(yval)) {
+          roots.push({ x, y: yval });
+        }
+      }
+    }
+  }
+  // Pick the first root found
+  return roots.length > 0 ? roots[0] : null;
+}
 
 // --- Responsive ---
 function resize() {
@@ -199,8 +309,8 @@ function setup3D() {
   PObj = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 16), new THREE.MeshPhongMaterial({ color: 0x111111 }));
   NObj = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 16), new THREE.MeshPhongMaterial({ color: 0xdd2222 }));
   lineObj = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x00aa00, dashSize: 0.04, gapSize: 0.04 }));
-  sumObj = new THREE.Mesh(new THREE.SphereGeometry(0.06, 32, 16), new THREE.MeshPhongMaterial({ color: 0xff00cc }));
-  sumLabelObj = null;
+  //sumObj = new THREE.Mesh(new THREE.SphereGeometry(0.06, 32, 16), new THREE.MeshPhongMaterial({ color: 0xff00cc }));
+  //sumLabelObj = null;
 
   scene.add(curveNObj);
     scene.add(antipodalCurveNObj);
@@ -210,7 +320,7 @@ function setup3D() {
   scene.add(PObj);
   scene.add(NObj);
   scene.add(lineObj);
-  scene.add(sumObj);
+  //scene.add(sumObj);
 
   animate();
 }
@@ -243,24 +353,22 @@ function update3D() {
   const curvePointsP = [];
   for (let i = 0; i < Xp.length; ++i) curvePointsP.push(new THREE.Vector3(Xp[i], Yp[i], Zp[i]));
   curvePObj.geometry.setFromPoints(curvePointsP);
-  console.log("Curve points P:", curvePObj);
   // Draw negative branch
   const curvePointsN = [];
   for (let i = 0; i < Xn.length; ++i) curvePointsN.push(new THREE.Vector3(Xn[i], Yn[i], Zn[i]));
   curveNObj.geometry.setFromPoints(curvePointsN);
-    // Draw antipodal points (negative branches)
-const antipodalCurvePointsP = [];
-for (let i = 0; i < Xp.length; ++i) {
+  // Draw antipodal points (negative branches)
+  const antipodalCurvePointsP = [];
+  for (let i = 0; i < Xp.length; ++i) {
     antipodalCurvePointsP.push(new THREE.Vector3(-Xp[i], -Yp[i], -Zp[i]));
-}
-antipodalCurvePObj.geometry.setFromPoints(antipodalCurvePointsP);
+  }
+  antipodalCurvePObj.geometry.setFromPoints(antipodalCurvePointsP);
 
-const antipodalCurvePointsN = [];
-for (let i = 0; i < Xn.length; ++i) {
+  const antipodalCurvePointsN = [];
+  for (let i = 0; i < Xn.length; ++i) {
     antipodalCurvePointsN.push(new THREE.Vector3(-Xn[i], -Yn[i], -Zn[i]));
-}
-antipodalCurveNObj.geometry.setFromPoints(antipodalCurvePointsN);
-
+  }
+  antipodalCurveNObj.geometry.setFromPoints(antipodalCurvePointsN);
 
   // 2. Infinity circle (z=0)
   const infPts = [];
@@ -269,19 +377,37 @@ antipodalCurveNObj.geometry.setFromPoints(antipodalCurvePointsN);
   }
   infCircleObj.geometry.setFromPoints(infPts);
 
-  // 3. P and -P on sphere
-  const normP = Math.sqrt(P.x * P.x + P.y * P.y + 1);
-  const P3 = [P.x / normP, P.y / normP, 1 / normP];
-  const N3 = [P.x / normP, -P.y / normP, 1 / normP];
+  // 3. P and Q on sphere
+  function affineToSphere(pt) {
+    const norm = Math.sqrt(pt.x * pt.x + pt.y * pt.y + 1);
+    return [pt.x / norm, pt.y / norm, 1 / norm];
+  }
+  const P3 = affineToSphere(P);
+  const Q3 = affineToSphere(Q);
   PObj.position.set(...P3);
-  NObj.position.set(...N3);
+  NObj.position.set(...affineToSphere({ x: P.x, y: -P.y }));
 
-  // 4. Great circle through P and -P
-  const normal = new THREE.Vector3().crossVectors(
-    new THREE.Vector3(...P3),
-    new THREE.Vector3(...N3)
-  ).normalize();
-  const v1 = new THREE.Vector3(...P3);
+  // Draw Q and -Q as additional spheres
+  if (!scene.getObjectByName('QObj')) {
+    const QObj = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 16), new THREE.MeshPhongMaterial({ color: 0x0aa00 }));
+    QObj.name = 'QObj';
+    scene.add(QObj);
+  }
+  //if (!scene.getObjectByName('NQObj')) {
+  //  const NQObj = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 16), new THREE.MeshPhongMaterial({ color: 0xa60 }));
+  //  NQObj.name = 'NQObj';
+    //scene.add(NQObj);
+  //}
+  const QObj = scene.getObjectByName('QObj');
+  //const NQObj = scene.getObjectByName('NQObj');
+  QObj.position.set(...Q3);
+  //NQObj.position.set(...affineToSphere({ x: Q.x, y: -Q.y }));
+
+  // 4. Great circle through P and Q
+  const vP = new THREE.Vector3(...P3);
+  const vQ = new THREE.Vector3(...Q3);
+  const normal = new THREE.Vector3().crossVectors(vP, vQ).normalize();
+  const v1 = vP.clone().normalize();
   const v2 = new THREE.Vector3().crossVectors(normal, v1).normalize();
   const greatCirclePts = [];
   for (let phi = 0; phi <= 2 * Math.PI + 0.01; phi += 0.01) {
@@ -291,32 +417,85 @@ antipodalCurveNObj.geometry.setFromPoints(antipodalCurvePointsN);
   }
   lineObj.geometry.setFromPoints(greatCirclePts);
 
-  // 5. Intersection with z=0 (sum marker)
-  let found = false;
-  for (let i = 1; i < greatCirclePts.length; ++i) {
-    if (greatCirclePts[i - 1].z * greatCirclePts[i].z < 0) {
-      // Linear interpolation
-      const t = -greatCirclePts[i - 1].z / (greatCirclePts[i].z - greatCirclePts[i - 1].z);
-      const x = greatCirclePts[i - 1].x + t * (greatCirclePts[i].x - greatCirclePts[i - 1].x);
-      const y = greatCirclePts[i - 1].y + t * (greatCirclePts[i].y - greatCirclePts[i - 1].y);
-      sumObj.position.set(x, y, 0);
-      found = true;
-      break;
+  // 5. Find intersection(s) of great circle with the curve on the sphere
+  // Special case: if P and Q are negatives of each other (P_y = -Q_y), use intersection with the red circle (z=0, hyperplane at infinity)
+  let intersections = [];
+  const areNegatives = Math.abs(P.x - Q.x) < 8e-2 && Math.abs(P.y + Q.y) < 8e-2;
+  //console.log("P_x " + P.x + ", P_y " + P.y + ", Q_x " + Q.x + ", Q_y " + Q.y);
+  if (areNegatives) {
+    
+    console.log("P and Q are negatives of each other, using great circle intersection with z=0");
+    // Intersect great circle with z=0 (red circle)
+    for (let i = 1; i < greatCirclePts.length; ++i) {
+      const z1 = greatCirclePts[i - 1].z;
+      const z2 = greatCirclePts[i].z;
+      if (z1 * z2 < 0) {
+        // Linear interpolation for root
+        const t = Math.abs(z1) / (Math.abs(z1) + Math.abs(z2));
+        const x = greatCirclePts[i - 1].x + t * (greatCirclePts[i].x - greatCirclePts[i - 1].x);
+        const y = greatCirclePts[i - 1].y + t * (greatCirclePts[i].y - greatCirclePts[i - 1].y);
+        intersections.push(new THREE.Vector3(x, y, 0).normalize());
+      }
+    }
+  } else {
+    // Only consider points on the curve (i.e., those that are close to the blue curve on the sphere)
+    // We'll use the same parameterization as for the curve itself
+    // Sample the curve (both branches) and check for proximity to the great circle
+    const curveSamplePts = [];
+    for (let x = -100; x <= 100; x += 0.01) {
+      const y2 = x ** 3 + a * x + b;
+      if (y2 >= 0) {
+        const y = Math.sqrt(y2);
+        // Positive branch
+        let norm = Math.sqrt(x * x + y * y + 1);
+        curveSamplePts.push(new THREE.Vector3(x / norm, y / norm, 1 / norm));
+        // Negative branch
+        norm = Math.sqrt(x * x + y * y + 1);
+        curveSamplePts.push(new THREE.Vector3(x / norm, -y / norm, 1 / norm));
+      }
+    }
+    // For each curve point, check if it lies on the great circle (within tolerance)
+    // Use the normal vector already computed above
+    const TOL = 5e-3;
+    for (const pt of curveSamplePts) {
+      // A point is on the great circle if dot(normal, pt) ≈ 0
+      if (Math.abs(normal.dot(pt)) < TOL) {
+        intersections.push(pt.clone());
+      }
     }
   }
-  if (!found) sumObj.position.set(0, 0, 0);
+  // Remove old intersection markers
+  //for (let obj of scene.children.filter(o => o.name && o.name.startsWith('Intersection'))) {
+  //  scene.remove(obj);
+  //}
+  // Filter intersections: remove those too close to P or Q (on the sphere)
+  const EPS = 5e-2;
+  const Pvec = new THREE.Vector3(...P3);
+  const Qvec = new THREE.Vector3(...Q3);
+  const filtered = intersections.filter(pt =>
+    pt.distanceTo(Pvec) > EPS && pt.distanceTo(Qvec) > EPS
+  );
+  // Plot both intersection points (after filtering)
+  /*filtered.slice(0, 2).forEach((pt, idx) => {
+    const marker = new THREE.Mesh(new THREE.SphereGeometry(0.06, 32, 16), new THREE.MeshPhongMaterial({ color: 0xd0a }));
+    marker.position.copy(pt);
+    marker.name = 'Intersection' + idx;
+    //scene.add(marker);
+  });*/
 
-  // Remove old label
-  if (sumLabelObj) {
-    scene.remove(sumLabelObj);
-    sumLabelObj = null;
+  // Draw R (first intersection not P or Q) as a persistent object for easy update
+  if (!scene.getObjectByName('RObj')) {
+    const RObj = new THREE.Mesh(new THREE.SphereGeometry(0.08, 32, 16), new THREE.MeshPhongMaterial({ color: 0xff00cc }));
+    RObj.name = 'RObj';
+    scene.add(RObj);
   }
-  // Add label for sum
-  if (found) {
-    const sprite = makeTextSprite("P+(-P)=O", { fontsize: 60, borderColor: {r:255,g:0,b:255, a:1.0}, backgroundColor: {r:255,g:255,b:255,a:0.8}, textColor: "#d0a" });
-    sprite.position.copy(sumObj.position).add(new THREE.Vector3(0.08, 0.08, 0.08));
-    scene.add(sprite);
-    sumLabelObj = sprite;
+  const RObj = scene.getObjectByName('RObj');
+  if (filtered.length > 0) {
+    RObj.visible = true;
+    RObj.position.copy(filtered[0]);
+  } else {
+    console.warn("No intersection found");
+    RObj.visible = false;
   }
 }
 
