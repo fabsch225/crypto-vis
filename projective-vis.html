@@ -61,6 +61,7 @@
 </div>
 <script type="module">
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.module.js";
+import { OrbitControls } from "https://unpkg.com/three@0.153.0/examples/jsm/controls/OrbitControls.js?module";
 
 // --- Parameters ---
 let a = -2, b = 2;
@@ -331,6 +332,7 @@ function findThirdIntersection(P, Q) {
 
 // --- 3D Projective View ---
 let renderer, scene, camera, sphereMesh, curvePObj,curveNObj, antipodalCurvePObj,  antipodalCurveNObj, infCircleObj, PObj, NObj, lineObj, sumObj, sumLabelObj;
+let controls; // OrbitControls instance
 
 function setup3D() {
   const container = document.getElementById('projective3d');
@@ -345,6 +347,16 @@ function setup3D() {
   camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 100);
   camera.position.set(2, 2, 2.5);
   camera.lookAt(0, 0, 0);
+
+  // --- Add OrbitControls ---
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.screenSpacePanning = false;
+  controls.minDistance = 1.2;
+  controls.maxDistance = 10;
+  controls.target.set(0, 0, 0);
+  controls.update();
 
   // Light
   const light = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -588,6 +600,7 @@ function makeTextSprite(message, parameters) {
 }
 
 function animate() {
+  controls && controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
