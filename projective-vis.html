@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Elliptic Curve Projective Visualization</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #f8f8f8; }
+    #container { display: flex; flex-direction: row; width: 100vw; height: 100vh; }
+    #affine2d { flex: 1 1 0; background: #fff; border-right: 2px solid #ccc; position: relative; }
+    #affine2d canvas { width: 100%; height: 100%; display: block; }
+    #projective3d { flex: 1 1 0; background: #fff; }
+    .label { position: absolute; background: #fff; padding: 2px 6px; border-radius: 4px; font-weight: bold; pointer-events: none; }
+  </style>
+</head>
+<body>
+<div id="container">
+  <div id="affine2d">
+    <canvas id="affineCanvas"></canvas>
+    <div id="labelP" class="label"></div>
+    <div id="labelN" class="label"></div>
+  </div>
+  <div id="projective3d"></div>
+</div>
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.module.js";
+
+// --- Parameters ---
+const a = -2, b = 2;
+
+// --- 2D Affine View ---
+const affineCanvas = document.getElementById('affineCanvas');
+const ctx = affineCanvas.getContext('2d');
+let width = 0, height = 0;
+let xMin = -4, xMax = 5, yMin = -6, yMax = 6;
+
+// --- 2D Curve Data ---
+function getAffineCurvePoints() {
+  const xs = [], yp = [], yn = [];
+  for (let x = xMin; x <= xMax; x += 0.01) {
+    const y2 = x ** 3 + a * x + b;
+    if (y2 >= 0) {
+      xs.push(x);
+      yp.push(Math.sqrt(y2));
+      yn.push(-Math.sqrt(y2));
+    }
+  }
+  return { xs, yp, yn };
+}
+
+// --- 2D Point P (draggable) ---
+let P = { x: 1, y: Math.sqrt(1 ** 3 + a * 1 + b) };
+let dragging = false;
+function getYOnCurve(x, sign = 1) {
+  const y2 = x ** 3 + a * x + b;
+  if (y2 < 0) return null;
+  return sign * Math.sqrt(y2);
+}
+
+// --- 2D Drawing ---
+function toCanvasX(x) { return (x - xMin) / (xMax - xMin) * width; }
+function toCanvasY(y) { return height - (y - yMin) / (yMax - yMin) * height; }
+function fromCanvasX(px) { return xMin + (px / width) * (xMax - xMin); }
+function fromCanvasY(py) { return yMin + ((height - py) / height) * (yMax - yMin); }
+
+function drawAffine() {
+  ctx.clearRect(0, 0, width, height);
+  // Axes
+  ctx.strokeStyle = "#bbb";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(toCanvasX(xMin), toCanvasY(0));
+  ctx.lineTo(toCanvasX(xMax), toCanvasY(0));
+  ctx.moveTo(toCanvasX(0), toCanvasY(yMin));
+  ctx.lineTo(toCanvasX(0), toCanvasY(yMax));
+  ctx.stroke();
+
+  // Curve
+  const { xs, yp, yn } = getAffineCurvePoints();
+  ctx.strokeStyle = "#1976d2";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  xs.forEach((x, i) => {
+    const px = toCanvasX(x), py = toCanvasY(yp[i]);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  });
+  ctx.stroke();
+  ctx.beginPath();
+  xs.forEach((x, i) => {
+    const px = toCanvasX(x), py = toCanvasY(yn[i]);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  });
+  ctx.stroke();
+
+  // P and -P
+  drawPoint(P.x, P.y, "black");
+  drawPoint(P.x, -P.y, "red");
+
+  // Vertical line through P
+  ctx.setLineDash([8, 8]);
+  ctx.strokeStyle = "green";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(toCanvasX(P.x), toCanvasY(yMin));
+  ctx.lineTo(toCanvasX(P.x), toCanvasY(yMax));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Labels
+  const labelP = document.getElementById('labelP');
+  const labelN = document.getElementById('labelN');
+  const px = toCanvasX(P.x), py = toCanvasY(P.y), npx = toCanvasX(P.x), npy = toCanvasY(-P.y);
+  labelP.textContent = "P";
+  labelN.textContent = "-P";
+  labelP.style.left = (px + 10) + "px";
+  labelP.style.top = (py - 20) + "px";
+  labelN.style.left = (npx + 10) + "px";
+  labelN.style.top = (npy - 20) + "px";
+}
+
+function drawPoint(x, y, color) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(toCanvasX(x), toCanvasY(y), 8, 0, 2 * Math.PI);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 2;
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// --- 2D Dragging Logic ---
+affineCanvas.addEventListener('mousedown', e => {
+  const rect = affineCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const dx = toCanvasX(P.x) - mx, dy = toCanvasY(P.y) - my;
+  if (dx * dx + dy * dy < 16 * 16) dragging = true;
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const rect = affineCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const x = Math.max(xMin + 0.1, Math.min(xMax - 0.1, fromCanvasX(mx)));
+  const y = getYOnCurve(x, Math.sign(P.y));
+  if (y !== null) {
+    P.x = x;
+    P.y = y;
+    drawAffine();
+    update3D();
+  }
+});
+window.addEventListener('mouseup', () => dragging = false);
+
+// --- Responsive ---
+function resize() {
+  width = affineCanvas.width = affineCanvas.offsetWidth;
+  height = affineCanvas.height = affineCanvas.offsetHeight;
+  drawAffine();
+  update3D();
+}
+window.addEventListener('resize', resize);
+setTimeout(resize, 100);
+
+// --- 3D Projective View ---
+let renderer, scene, camera, sphereMesh, curvePObj,curveNObj, antipodalCurvePObj,  antipodalCurveNObj, infCircleObj, PObj, NObj, lineObj, sumObj, sumLabelObj;
+
+function setup3D() {
+  const container = document.getElementById('projective3d');
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setClearColor(0xf8f8f8);
+  renderer.setSize(container.offsetWidth, container.offsetHeight);
+  container.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+
+  // Camera (static)
+  camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 100);
+  camera.position.set(2, 2, 2.5);
+  camera.lookAt(0, 0, 0);
+
+  // Light
+  const light = new THREE.DirectionalLight(0xffffff, 0.9);
+  light.position.set(2, 2, 3);
+  scene.add(light);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+  // Sphere
+  const sphereGeom = new THREE.SphereGeometry(1, 64, 32);
+  const sphereMat = new THREE.MeshPhongMaterial({ color: 0xeeeeee, transparent: true, opacity: 0.5, shininess: 80 });
+  sphereMesh = new THREE.Mesh(sphereGeom, sphereMat);
+  scene.add(sphereMesh);
+
+  // Curve, antipodal, infinity circle, points, line, sum marker
+  curveNObj = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x1976d2, linewidth: 3 }));
+  antipodalCurveNObj = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x1976d2, linewidth: 3 }));
+  curvePObj = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x1976d2, linewidth: 3 }));
+  antipodalCurvePObj = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x1976d2, linewidth: 3 }));
+  infCircleObj = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0xff0000, dashSize: 0.05, gapSize: 0.05 }));
+  PObj = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 16), new THREE.MeshPhongMaterial({ color: 0x111111 }));
+  NObj = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 16), new THREE.MeshPhongMaterial({ color: 0xdd2222 }));
+  lineObj = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x00aa00, dashSize: 0.04, gapSize: 0.04 }));
+  sumObj = new THREE.Mesh(new THREE.SphereGeometry(0.06, 32, 16), new THREE.MeshPhongMaterial({ color: 0xff00cc }));
+  sumLabelObj = null;
+
+  scene.add(curveNObj);
+    scene.add(antipodalCurveNObj);
+    scene.add(curvePObj);
+    scene.add(antipodalCurvePObj);
+  scene.add(infCircleObj);
+  scene.add(PObj);
+  scene.add(NObj);
+  scene.add(lineObj);
+  scene.add(sumObj);
+
+  animate();
+}
+
+function update3D() {
+  // 1. Curve on sphere
+  const x_range = [];
+  for (let x = -100; x <= 100; x += 0.01) x_range.push(x);
+  // Separate arrays for positive and negative branches
+  const Xp = [], Yp = [], Zp = [];
+  const Xn = [], Yn = [], Zn = [];
+  for (let i = 0; i < x_range.length; ++i) {
+    const x = x_range[i];
+    const y2 = x ** 3 + a * x + b;
+    if (y2 >= 0) {
+      const y = Math.sqrt(y2);
+      // Positive branch
+      const normp = Math.sqrt(x * x + y * y + 1);
+      Xp.push(x / normp);
+      Yp.push(y / normp);
+      Zp.push(1 / normp);
+      // Negative branch
+      const normn = Math.sqrt(x * x + y * y + 1); // same as normp
+      Xn.push(x / normn);
+      Yn.push(-y / normn);
+      Zn.push(1 / normn);
+    }
+  }
+  // Draw positive branch
+  const curvePointsP = [];
+  for (let i = 0; i < Xp.length; ++i) curvePointsP.push(new THREE.Vector3(Xp[i], Yp[i], Zp[i]));
+  curvePObj.geometry.setFromPoints(curvePointsP);
+  console.log("Curve points P:", curvePObj);
+  // Draw negative branch
+  const curvePointsN = [];
+  for (let i = 0; i < Xn.length; ++i) curvePointsN.push(new THREE.Vector3(Xn[i], Yn[i], Zn[i]));
+  curveNObj.geometry.setFromPoints(curvePointsN);
+    // Draw antipodal points (negative branches)
+const antipodalCurvePointsP = [];
+for (let i = 0; i < Xp.length; ++i) {
+    antipodalCurvePointsP.push(new THREE.Vector3(-Xp[i], -Yp[i], -Zp[i]));
+}
+antipodalCurvePObj.geometry.setFromPoints(antipodalCurvePointsP);
+
+const antipodalCurvePointsN = [];
+for (let i = 0; i < Xn.length; ++i) {
+    antipodalCurvePointsN.push(new THREE.Vector3(-Xn[i], -Yn[i], -Zn[i]));
+}
+antipodalCurveNObj.geometry.setFromPoints(antipodalCurvePointsN);
+
+
+  // 2. Infinity circle (z=0)
+  const infPts = [];
+  for (let t = 0; t <= 2 * Math.PI + 0.01; t += 0.01) {
+    infPts.push(new THREE.Vector3(Math.cos(t), Math.sin(t), 0));
+  }
+  infCircleObj.geometry.setFromPoints(infPts);
+
+  // 3. P and -P on sphere
+  const normP = Math.sqrt(P.x * P.x + P.y * P.y + 1);
+  const P3 = [P.x / normP, P.y / normP, 1 / normP];
+  const N3 = [P.x / normP, -P.y / normP, 1 / normP];
+  PObj.position.set(...P3);
+  NObj.position.set(...N3);
+
+  // 4. Great circle through P and -P
+  const normal = new THREE.Vector3().crossVectors(
+    new THREE.Vector3(...P3),
+    new THREE.Vector3(...N3)
+  ).normalize();
+  const v1 = new THREE.Vector3(...P3);
+  const v2 = new THREE.Vector3().crossVectors(normal, v1).normalize();
+  const greatCirclePts = [];
+  for (let phi = 0; phi <= 2 * Math.PI + 0.01; phi += 0.01) {
+    const pt = v1.clone().multiplyScalar(Math.cos(phi)).add(v2.clone().multiplyScalar(Math.sin(phi)));
+    pt.normalize();
+    greatCirclePts.push(pt);
+  }
+  lineObj.geometry.setFromPoints(greatCirclePts);
+
+  // 5. Intersection with z=0 (sum marker)
+  let found = false;
+  for (let i = 1; i < greatCirclePts.length; ++i) {
+    if (greatCirclePts[i - 1].z * greatCirclePts[i].z < 0) {
+      // Linear interpolation
+      const t = -greatCirclePts[i - 1].z / (greatCirclePts[i].z - greatCirclePts[i - 1].z);
+      const x = greatCirclePts[i - 1].x + t * (greatCirclePts[i].x - greatCirclePts[i - 1].x);
+      const y = greatCirclePts[i - 1].y + t * (greatCirclePts[i].y - greatCirclePts[i - 1].y);
+      sumObj.position.set(x, y, 0);
+      found = true;
+      break;
+    }
+  }
+  if (!found) sumObj.position.set(0, 0, 0);
+
+  // Remove old label
+  if (sumLabelObj) {
+    scene.remove(sumLabelObj);
+    sumLabelObj = null;
+  }
+  // Add label for sum
+  if (found) {
+    const sprite = makeTextSprite("P+(-P)=O", { fontsize: 60, borderColor: {r:255,g:0,b:255, a:1.0}, backgroundColor: {r:255,g:255,b:255,a:0.8}, textColor: "#d0a" });
+    sprite.position.copy(sumObj.position).add(new THREE.Vector3(0.08, 0.08, 0.08));
+    scene.add(sprite);
+    sumLabelObj = sprite;
+  }
+}
+
+function makeTextSprite(message, parameters) {
+  const fontface = parameters.fontface || "Arial";
+  const fontsize = parameters.fontsize || 24;
+  const borderThickness = parameters.borderThickness || 2;
+  const borderColor = parameters.borderColor || { r:0, g:0, b:0, a:1.0 };
+  const backgroundColor = parameters.backgroundColor || { r:255, g:255, b:255, a:1.0 };
+  const textColor = parameters.textColor || "#000";
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  context.font = fontsize + "px " + fontface;
+  const metrics = context.measureText(message);
+  const textWidth = metrics.width;
+  canvas.width = textWidth + 20;
+  canvas.height = fontsize + 20;
+  context.font = fontsize + "px " + fontface;
+  context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
+  context.lineWidth = borderThickness;
+  context.strokeRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = textColor;
+  context.fillText(message, 10, fontsize + 2);
+  const texture = new THREE.Texture(canvas);
+  texture.needsUpdate = true;
+  const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+  const sprite = new THREE.Sprite(spriteMaterial);
+  sprite.scale.set(0.35, 0.12, 1.0);
+  return sprite;
+}
+
+function animate() {
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+// --- Init ---
+setup3D();
+resize();
+update3D();
+
+</script>
+</body>
+</html>
